@@ -1,0 +1,72 @@
+add_user:
+  name: Add user
+  description: Add or replace a notifications user from service data.
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+    ha_user:
+      selector:
+        text:
+    label:
+      selector:
+        text:
+    email:
+      selector:
+        text:
+    email_enabled:
+      selector:
+        boolean:
+    push_target:
+      selector:
+        text:
+    push_enabled:
+      selector:
+        boolean:
+    roles:
+      selector:
+        object:
+
+update_user:
+  name: Update user
+  description: Update a notifications user.
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+    ha_user:
+      selector:
+        text:
+    label:
+      selector:
+        text:
+    email:
+      selector:
+        text:
+    email_enabled:
+      selector:
+        boolean:
+    push_target:
+      selector:
+        text:
+    push_enabled:
+      selector:
+        boolean:
+    roles:
+      selector:
+        object:
+
+remove_user:
+  name: Remove user
+  description: Remove a notifications user and its entities.
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+
+reload:
+  name: Reload users
+  description: Reload notifications users from notifications_users.yaml.

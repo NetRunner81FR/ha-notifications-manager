@@ -1,0 +1,26 @@
+users:
+  - id: admin_demo
+    ha_user: "admin"
+    label: "Admin demo"
+    email: "admin@example.invalid"
+    email_enabled: false
+    push_target: "notify.mobile_app_demo"
+    push_enabled: false
+    roles:
+      admin: true
+      proprietaire: true
+      resident: false
+      utilisateur: false
+
+  - id: user_demo
+    ha_user: "user"
+    label: "User demo"
+    email: "user@example.invalid"
+    email_enabled: false
+    push_target: ""
+    push_enabled: false
+    roles:
+      admin: false
+      proprietaire: false
+      resident: false
+      utilisateur: true

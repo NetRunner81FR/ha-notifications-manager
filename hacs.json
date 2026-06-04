@@ -1,0 +1,6 @@
+{
+  "name": "Notifications Manager",
+  "render_readme": true,
+  "domains": ["notifications_manager"],
+  "homeassistant": "2024.6.0"
+}
