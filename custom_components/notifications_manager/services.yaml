@@ -1,72 +1,158 @@
-add_user:
-  name: Add user
-  description: Add or replace a notifications user from service data.
+notify:
+  name: Envoyer une notification
+  description: Achemine une notification vers les utilisateurs selon les roles fournis.
   fields:
-    id:
+    title:
+      name: Titre
+      description: Titre de la notification
       required: true
       selector:
         text:
-    ha_user:
+    message:
+      name: Message
+      description: Corps de la notification
+      required: true
+      selector:
+        text:
+    category:
+      name: Categorie
+      description: "Niveau de l alerte : info | alerte | critique"
+      required: true
+      example: "info"
+      selector:
+        text:
+    roles:
+      name: Roles
+      description: "Liste des roles destinataires : admin | proprietaire | resident | utilisateur"
+      required: true
+      example: "[admin, proprietaire]"
+      selector:
+        object:
+    source:
+      name: Source
+      description: Package ou domaine appelant (optionnel)
+      required: false
+      selector:
+        text:
+    alert_id:
+      name: ID alerte
+      description: Identifiant stable de l alerte pour tracabilite (optionnel)
+      required: false
+      selector:
+        text:
+    dedupe_key:
+      name: Cle deduplication
+      description: Reserve anti-spam futur (optionnel)
+      required: false
+      selector:
+        text:
+    priority:
+      name: Priorite
+      description: Reserve routage futur (optionnel)
+      required: false
+      selector:
+        text:
+    dry_run:
+      name: Simulation
+      description: Logue sans emettre de notification reelle
+      required: false
+      selector:
+        boolean:
+
+add_user:
+  name: Ajouter un utilisateur
+  description: Cree un profil utilisateur et les entites associees.
+  fields:
+    id:
+      name: Identifiant
+      description: Slug ASCII unique (ex. marie)
+      required: true
       selector:
         text:
     label:
+      name: Libelle
+      description: Nom affiche dans la card
+      required: true
       selector:
         text:
     email:
+      name: Email
+      required: false
       selector:
         text:
     email_enabled:
+      name: Email actif
+      required: false
       selector:
         boolean:
     push_target:
+      name: Service push
+      description: ex. notify.mobile_app_s23
+      required: false
       selector:
         text:
     push_enabled:
+      name: Push actif
+      required: false
       selector:
         boolean:
+    ha_user:
+      name: Compte HA associe
+      description: Nom du compte HA pour la resolution des droits card
+      required: false
+      selector:
+        text:
     roles:
+      name: Roles
+      description: "Dictionnaire de roles : {admin: true, proprietaire: false, ...}"
+      required: false
       selector:
         object:
 
 update_user:
-  name: Update user
-  description: Update a notifications user.
+  name: Modifier un utilisateur
+  description: Met a jour un ou plusieurs champs d un profil existant.
   fields:
     id:
+      name: Identifiant
       required: true
       selector:
         text:
-    ha_user:
-      selector:
-        text:
     label:
+      required: false
       selector:
         text:
     email:
+      required: false
       selector:
         text:
     email_enabled:
+      required: false
       selector:
         boolean:
     push_target:
+      required: false
       selector:
         text:
     push_enabled:
+      required: false
       selector:
         boolean:
     roles:
+      required: false
       selector:
         object:
 
 remove_user:
-  name: Remove user
-  description: Remove a notifications user and its entities.
+  name: Supprimer un utilisateur
+  description: Supprime le profil et toutes les entites associees.
   fields:
     id:
+      name: Identifiant
       required: true
       selector:
         text:
 
 reload:
-  name: Reload users
-  description: Reload notifications users from notifications_users.yaml.
+  name: Recharger la configuration
+  description: Relit notifications_users.yaml et resynchronise les entites sans redemarrer HA.

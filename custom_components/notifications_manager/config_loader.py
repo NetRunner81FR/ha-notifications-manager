@@ -1,71 +1,66 @@
-from __future__ import annotations
+"""Lecture et ecriture du fichier notifications_users.yaml."""
+import logging
+import os
 
-from pathlib import Path
-from typing import Any
-
+import voluptuous as vol
 import yaml
 
-from homeassistant.core import HomeAssistant
+from .const import CONFIG_FILE, ROLES
 
-from .const import CONF_FILE, ROLES
+_LOGGER = logging.getLogger(__name__)
 
+USER_SCHEMA = vol.Schema({
+    vol.Required("id"): str,
+    vol.Optional("ha_user"): str,
+    vol.Required("label"): str,
+    vol.Optional("email", default=""): str,
+    vol.Optional("email_enabled", default=False): bool,
+    vol.Optional("push_target", default=""): str,
+    vol.Optional("push_enabled", default=False): bool,
+    vol.Required("roles"): {
+        vol.Optional("admin", default=False): bool,
+        vol.Optional("proprietaire", default=False): bool,
+        vol.Optional("resident", default=False): bool,
+        vol.Optional("utilisateur", default=False): bool,
+    },
+})
 
-def _config_path(hass: HomeAssistant) -> Path:
-    return Path(hass.config.path(CONF_FILE))
-
-
-def _normalise_user(raw: dict[str, Any]) -> dict[str, Any]:
-    roles = raw.get("roles") or {}
-    return {
-        "id": str(raw.get("id", "")).strip().lower(),
-        "ha_user": str(raw.get("ha_user", "")).strip(),
-        "label": str(raw.get("label", "")).strip(),
-        "email": str(raw.get("email", "")).strip(),
-        "email_enabled": bool(raw.get("email_enabled", False)),
-        "push_target": str(raw.get("push_target", "")).strip(),
-        "push_enabled": bool(raw.get("push_enabled", False)),
-        "roles": {role: bool(roles.get(role, False)) for role in ROLES},
-    }
-
-
-async def async_load_users(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
-    path = _config_path(hass)
-    if not path.exists():
-        return {}
-
-    def _load() -> dict[str, dict[str, Any]]:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        users: dict[str, dict[str, Any]] = {}
-        for raw in data.get("users", []) or []:
-            if not isinstance(raw, dict):
-                continue
-            user = _normalise_user(raw)
-            if user["id"]:
-                users[user["id"]] = user
-        return users
-
-    return await hass.async_add_executor_job(_load)
+CONFIG_SCHEMA = vol.Schema({
+    vol.Optional("version", default=1): int,
+    vol.Optional("roles_available", default=ROLES): list,
+    vol.Optional("users", default=[]): [USER_SCHEMA],
+})
 
 
-async def async_save_users(hass: HomeAssistant, users: dict[str, dict[str, Any]]) -> None:
-    path = _config_path(hass)
+def load_config(path: str = CONFIG_FILE) -> dict:
+    """Charge et valide le fichier de configuration."""
+    if not os.path.exists(path):
+        _LOGGER.warning("notifications_manager: %s absent, demarrage avec config vide", path)
+        return {"version": 1, "users": []}
 
-    def _save() -> None:
-        serialised = {"users": []}
-        for user_id in sorted(users):
-            user = users[user_id]
-            serialised["users"].append(
-                {
-                    "id": user_id,
-                    "ha_user": user.get("ha_user", ""),
-                    "label": user.get("label", ""),
-                    "email": user.get("email", ""),
-                    "email_enabled": bool(user.get("email_enabled", False)),
-                    "push_target": user.get("push_target", ""),
-                    "push_enabled": bool(user.get("push_enabled", False)),
-                    "roles": {role: bool((user.get("roles") or {}).get(role, False)) for role in ROLES},
-                }
-            )
-        path.write_text(yaml.safe_dump(serialised, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        return CONFIG_SCHEMA(raw)
+    except (yaml.YAMLError, vol.Invalid) as err:
+        _LOGGER.error("notifications_manager: config invalide dans %s : %s", path, err)
+        return {"version": 1, "users": []}
 
-    await hass.async_add_executor_job(_save)
+
+def save_config(config: dict, path: str = CONFIG_FILE) -> None:
+    """Persiste la configuration dans le fichier YAML."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except OSError as err:
+        _LOGGER.error("notifications_manager: impossible d'ecrire %s : %s", path, err)
+
+
+def find_user(config: dict, user_id: str) -> dict | None:
+    return next((u for u in config.get("users", []) if u["id"] == user_id), None)
+
+
+def validate_user_id(user_id: str) -> bool:
+    """Verifie que l'id est un slug ASCII valide."""
+    import re
+    return bool(re.match(r"^[a-z0-9_]+$", user_id))
