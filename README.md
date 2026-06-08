@@ -94,20 +94,51 @@ Optional fields: `source`, `alert_id`, `dedupe_key`, `priority`, `dry_run`.
 
 ## Guard pattern per business package (v0.2.0+)
 
-Each business package can expose a level selector and an admin bypass:
+Each business package declares three helpers and computes the roles list in
+a Jinja template before calling the service.
 
 ```yaml
+# helpers
 input_select:
-  <pkg>_notification_level:
+  inondation_notification_level:
     options: [desactive, utilisateur, resident, proprietaire]
+    initial: resident
 
 input_boolean:
-  <pkg>_notif_admin:
-    name: "<Pkg> - Notify admin"
+  inondation_notif_admin:
+    name: "Inondation - Notify admin"
+    initial: true
+
+input_text:
+  inondation_last_event:
+    name: "Inondation - Last event"
+    max: 255
 ```
 
-Pass the computed roles list to `notifications_manager.notify` based on the
-selected level.
+```yaml
+# automation action — roles computed from level + admin bypass
+- service: notifications_manager.notify
+  data:
+    title: "Water detected"
+    message: "Sensor triggered at {{ now().strftime('%H:%M') }}"
+    category: critique
+    roles: >
+      {% set level = states('input_select.inondation_notification_level') %}
+      {% set ns = namespace(r=[]) %}
+      {% if is_state('input_boolean.inondation_notif_admin', 'on') %}
+        {% set ns.r = ns.r + ['admin'] %}
+      {% endif %}
+      {% if level == 'utilisateur' %}{% set ns.r = ns.r + ['utilisateur'] %}{% endif %}
+      {% if level == 'resident' %}{% set ns.r = ns.r + ['resident', 'utilisateur'] %}{% endif %}
+      {% if level == 'proprietaire' %}{% set ns.r = ns.r + ['proprietaire', 'resident', 'utilisateur'] %}{% endif %}
+      {{ ns.r }}
+```
+
+Level semantics: each level includes all levels below it.
+`desactive` silences all alerts except admin bypass (if enabled).
+
+A full copy-paste template is available in the factory repository at
+`ha-config/examples/guard_pattern_v2.yaml`.
 
 ## Services
 
