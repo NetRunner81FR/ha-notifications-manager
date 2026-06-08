@@ -1,4 +1,4 @@
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active)$/;
@@ -49,6 +49,20 @@ class NotificationsSupervisionPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <div class="panel">
+        <div class="panel-nav">
+          <button class="nav-btn" data-nav="/dashboard-apercu/accueil-maison">
+            <ha-icon icon="mdi:home-outline"></ha-icon>
+            <span>Accueil</span>
+          </button>
+          <button class="nav-btn" data-nav="/dashboard-notifications-v2/supervision-v2">
+            <ha-icon icon="mdi:bell-outline"></ha-icon>
+            <span>Supervision</span>
+          </button>
+          <button class="nav-btn" data-nav="/dashboard-admin/admin">
+            <ha-icon icon="mdi:cog-outline"></ha-icon>
+            <span>Admin</span>
+          </button>
+        </div>
         <div class="panel-header">
           <span class="panel-title">Notifications</span>
           <div class="tabs">${tabsHtml}</div>
@@ -60,6 +74,7 @@ class NotificationsSupervisionPanel extends HTMLElement {
       </div>`;
 
     this._attachTabListeners();
+    this._attachNavListeners();
     if (this._activeTab === "settings") this._attachSettingsListeners();
     if (this._activeTab === "supervision") this._attachSupervisionListeners();
   }
@@ -512,6 +527,17 @@ class NotificationsSupervisionPanel extends HTMLElement {
     });
   }
 
+  _navigate(path) {
+    history.pushState(null, "", path);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
+  _attachNavListeners() {
+    this.shadowRoot.querySelectorAll(".nav-btn").forEach((btn) => {
+      btn.addEventListener("click", () => this._navigate(btn.dataset.nav));
+    });
+  }
+
   _attachSettingsListeners() {
     const root = this.shadowRoot;
 
@@ -726,7 +752,11 @@ class NotificationsSupervisionPanel extends HTMLElement {
     return `
       :host{display:block;height:100%;background:var(--primary-background-color)}
       .panel{display:flex;flex-direction:column;height:100%;max-width:1200px;margin:0 auto;padding:0 16px;box-sizing:border-box}
-      .panel-header{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--divider-color);flex-wrap:wrap}
+      .panel-nav{display:flex;gap:4px;padding:8px 0 6px;border-bottom:1px solid var(--divider-color)}
+      .nav-btn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;cursor:pointer;padding:4px 10px;border-radius:20px;font-size:12px;color:var(--secondary-text-color);transition:.15s;font-family:inherit}
+      .nav-btn ha-icon{--mdc-icon-size:16px;color:inherit}
+      .nav-btn:hover{background:var(--secondary-background-color,rgba(0,0,0,.06));color:var(--primary-color)}
+      .panel-header{display:flex;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--divider-color);flex-wrap:wrap}
       .panel-title{font-size:18px;font-weight:700;color:var(--primary-text-color);white-space:nowrap}
       .version{color:var(--secondary-text-color);font-size:11px;white-space:nowrap;margin-left:auto}
       .tabs{display:flex;gap:4px;flex-wrap:wrap}

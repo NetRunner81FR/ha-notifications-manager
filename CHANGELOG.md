@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2-beta.1
+
+- Add navigation bar at the top of the supervision panel with three buttons:
+  Accueil, Supervision dashboard, Admin. Eliminates the need to use the browser
+  back button to exit the panel.
+- Panel JS bumped to v0.8.0.
+
 ## 0.2.1-beta.1
 
 - Fix: read `manifest.json` at module import time instead of inside the async
