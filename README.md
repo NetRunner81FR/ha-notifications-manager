@@ -1,3 +1,5 @@
+![Notifications Manager](./icon.png)
+
 # Home Assistant Notifications Manager
 
 Standalone HACS integration for managing notification recipients as native Home

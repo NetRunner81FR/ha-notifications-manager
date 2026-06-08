@@ -2,8 +2,18 @@
 from __future__ import annotations
 
 import ast
+import json
 import logging
 from pathlib import Path
+
+# Read manifest at import time (synchronous, before event loop) to avoid
+# blocking I/O inside async context (HA util.loop warning).
+try:
+    _MANIFEST_VERSION: str = json.loads(
+        (Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
+    )["version"]
+except Exception:
+    _MANIFEST_VERSION = "0"
 
 import voluptuous as vol
 from homeassistant.const import Platform
@@ -48,15 +58,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-def _get_version() -> str:
-    import json
-    manifest_path = Path(__file__).parent / "manifest.json"
-    try:
-        return json.loads(manifest_path.read_text())["version"]
-    except Exception:
-        return "0"
-
-
 async def _register_static_path(hass: HomeAssistant) -> None:
     www_path = Path(__file__).parent / "www"
     if not www_path.is_dir():
@@ -75,8 +76,7 @@ async def _register_static_path(hass: HomeAssistant) -> None:
 def _register_panel(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend import async_register_built_in_panel
-        version = _get_version()
-        url = f"/local/notifications_manager/notifications-supervision-panel.js?v={version}"
+        url = f"/local/notifications_manager/notifications-supervision-panel.js?v={_MANIFEST_VERSION}"
         async_register_built_in_panel(
             hass,
             "custom",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1-beta.1
+
+- Fix: read `manifest.json` at module import time instead of inside the async
+  event loop, eliminating the `blocking call to read_text` warning logged by
+  `homeassistant.util.loop` on every HA startup.
+
 ## 0.2.0-beta.1
 
 - Add native service `notifications_manager.notify` with category and roles routing.
