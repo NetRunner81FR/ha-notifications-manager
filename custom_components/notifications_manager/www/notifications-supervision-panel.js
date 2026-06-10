@@ -1,4 +1,4 @@
-const VERSION = "0.8.0";
+const VERSION = "0.9.0";
 
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active)$/;
@@ -9,6 +9,7 @@ const PKG_LEVEL_ALLOWLIST = /^input_select\.[a-z0-9_]+_notification_level$/;
 
 const TABS = [
   { id: "supervision", label: "Supervision" },
+  { id: "modules", label: "Modules" },
   { id: "users", label: "Utilisateurs" },
   { id: "settings", label: "Paramètres" },
   { id: "audit", label: "Audit" },
@@ -77,12 +78,15 @@ class NotificationsSupervisionPanel extends HTMLElement {
     this._attachNavListeners();
     if (this._activeTab === "settings") this._attachSettingsListeners();
     if (this._activeTab === "supervision") this._attachSupervisionListeners();
+    if (this._activeTab === "modules") this._loadModulesTab();
   }
 
   _renderTab() {
     switch (this._activeTab) {
       case "users":
         return this._renderUsers(this._discoverUsers());
+      case "modules":
+        return this._wrapSection("Taxonomie modules", `<div class="empty" id="modules-loading">Chargement…</div>`);
       case "audit":
         return this._wrapSection(
           "Couverture personnes HA",
@@ -514,6 +518,52 @@ class NotificationsSupervisionPanel extends HTMLElement {
     return toggleHtml;
   }
 
+  // ── Modules tab ─────────────────────────────────────────────────────────────
+
+  async _loadModulesTab() {
+    try {
+      const data = await this._hass.callApi("GET", "notifications_manager/modules");
+      const el = this.shadowRoot.querySelector("#modules-loading");
+      if (el) el.outerHTML = this._renderModules(data);
+    } catch (e) {
+      const el = this.shadowRoot.querySelector("#modules-loading");
+      if (el) el.textContent = "Erreur chargement taxonomie modules.";
+    }
+  }
+
+  _renderModules(data) {
+    const LEVEL_LABELS = {
+      desactive: "Désactivé", utilisateur: "Utilisateur",
+      resident: "Résident", proprietaire: "Propriétaire",
+    };
+    const renderGroup = (modules, typeBadge, typeLabel) => {
+      if (!modules || !modules.length)
+        return `<p class="empty">Aucun module ${typeLabel}.</p>`;
+      const tiles = modules.map((mod) => {
+        const levelEnt = `input_select.${mod}_notification_level`;
+        const adminEnt = `input_boolean.${mod}_notif_admin`;
+        const level = (this._hass.states[levelEnt]?.state) || "—";
+        const adminOn = this._boolState(adminEnt);
+        const levelLabel = LEVEL_LABELS[level] || level;
+        const active = level !== "desactive" || adminOn === true;
+        return `<article class="tile">
+          <div class="tile-head">
+            <strong>${this._escape(mod.replace(/_/g, " "))}</strong>
+            ${this._badge(typeBadge, typeBadge === "Core" ? "ok" : "info")}
+          </div>
+          <div class="rows">
+            <div class="row"><span>Niveau</span><b>${this._escape(levelLabel)}</b></div>
+            <div class="row"><span>Admin</span><b>${adminOn === true ? "Actif" : "Inactif"}</b></div>
+            <div class="row"><span>Statut</span>${this._badge(active ? "Actif" : "Silencieux", active ? "ok" : "warn")}</div>
+          </div>
+        </article>`;
+      }).join("");
+      return `<h4 style="margin:1rem 0 .5rem">${typeLabel}</h4><div class="grid">${tiles}</div>`;
+    };
+    return renderGroup(data.core, "Core", "Modules natifs (core)")
+      + renderGroup(data.subscribers, "Souscripteur", "Modules souscripteurs");
+  }
+
   // ── Listeners ────────────────────────────────────────────────────────────────
 
   _attachTabListeners() {
@@ -773,6 +823,7 @@ class NotificationsSupervisionPanel extends HTMLElement {
       .badge{border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap}
       .badge.ok{background:rgba(76,175,80,.15);color:var(--success-color,#43a047)}
       .badge.warn{background:rgba(255,152,0,.15);color:var(--warning-color,#fb8c00)}
+      .badge.info{background:rgba(33,150,243,.15);color:var(--info-color,#1976d2)}
       .rows{display:grid;gap:6px}
       .row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;font-size:13px}
       .row span{color:var(--secondary-text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -1,6 +1,7 @@
 DOMAIN = "notifications_manager"
 
 CONFIG_FILE = "/config/notifications_users.yaml"
+MODULES_CONFIG_FILE = "/config/notifications_modules.yaml"
 
 ROLES = ["admin", "proprietaire", "resident", "utilisateur"]
 

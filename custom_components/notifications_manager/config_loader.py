@@ -5,7 +5,7 @@ import os
 import voluptuous as vol
 import yaml
 
-from .const import CONFIG_FILE, ROLES
+from .const import CONFIG_FILE, MODULES_CONFIG_FILE, ROLES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,3 +64,22 @@ def validate_user_id(user_id: str) -> bool:
     """Verifie que l'id est un slug ASCII valide."""
     import re
     return bool(re.match(r"^[a-z0-9_]+$", user_id))
+
+
+def load_modules_config(path: str = MODULES_CONFIG_FILE) -> dict:
+    """Charge notifications_modules.yaml, retourne {core: [...], subscribers: [...]}."""
+    empty = {"core": [], "subscribers": []}
+    if not os.path.exists(path):
+        _LOGGER.warning("notifications_manager: %s absent, modules vides", path)
+        return empty
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        data = raw.get("notifications_modules", {})
+        return {
+            "core": list(data.get("core") or []),
+            "subscribers": list(data.get("subscribers") or []),
+        }
+    except yaml.YAMLError as err:
+        _LOGGER.error("notifications_manager: notifications_modules.yaml invalide : %s", err)
+        return empty

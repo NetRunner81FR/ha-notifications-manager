@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0-beta.1
+
+- Add `module:` field to `notifications_manager.notify` service: auto-resolves roles
+  from `input_select.<module>_notification_level` + `input_boolean.<module>_notif_admin`.
+  Backward-compatible: explicit `roles:` still takes priority.
+- Add REST endpoint `GET /api/notifications_manager/modules` returning the
+  core/subscribers taxonomy loaded from `/config/notifications_modules.yaml`.
+- Add `load_modules_config()` in `config_loader.py` reading
+  `/config/notifications_modules.yaml` at startup.
+- Panel JS v0.9.0: add "Modules" tab showing core/subscriber taxonomy with
+  current notification level and admin status per module.
+- Bump component version to 0.3.0.
+
 ## 0.2.2-beta.1
 
 - Add navigation bar at the top of the supervision panel with three buttons:

@@ -25,6 +25,7 @@ from .config_loader import (
     CONFIG_FILE,
     find_user,
     load_config,
+    load_modules_config,
     save_config,
     validate_user_id,
 )
@@ -40,8 +41,10 @@ CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({})}, extra=vol.ALLOW_EXTRA)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Point d'entree YAML : charge la config et enregistre les services."""
     cfg = await hass.async_add_executor_job(load_config)
+    modules = await hass.async_add_executor_job(load_modules_config)
     hass.data[DOMAIN] = {
         "config": cfg,
+        "modules": modules,
         "entities": {},
         "switch_add_entities": None,
         "text_add_entities": None,
@@ -53,8 +56,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     _register_services(hass)
     await _register_static_path(hass)
     _register_panel(hass)
+    _register_api_views(hass)
 
-    _LOGGER.info("notifications_manager: %d utilisateur(s) charges", len(cfg.get("users", [])))
+    _LOGGER.info(
+        "notifications_manager: %d utilisateur(s), %d modules core, %d subscribers",
+        len(cfg.get("users", [])),
+        len(modules.get("core", [])),
+        len(modules.get("subscribers", [])),
+    )
     return True
 
 
@@ -71,6 +80,21 @@ async def _register_static_path(hass: HomeAssistant) -> None:
         _LOGGER.info("notifications_manager: static path /local/notifications_manager -> %s", www_path)
     except Exception as exc:
         _LOGGER.error("notifications_manager: erreur enregistrement static path: %s", exc)
+
+
+def _register_api_views(hass: HomeAssistant) -> None:
+    from homeassistant.components.http import HomeAssistantView
+
+    class NotificationsModulesView(HomeAssistantView):
+        url = "/api/notifications_manager/modules"
+        name = "api:notifications_manager:modules"
+        requires_auth = True
+
+        async def get(self, request):
+            modules = hass.data.get(DOMAIN, {}).get("modules", {"core": [], "subscribers": []})
+            return self.json(modules)
+
+    hass.http.register_view(NotificationsModulesView())
 
 
 def _register_panel(hass: HomeAssistant) -> None:
@@ -111,6 +135,29 @@ def _state_value(hass: HomeAssistant, entity_id: str) -> str:
     return "" if v in ("unknown", "unavailable", "none") else v
 
 
+def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
+    """Resout les roles a partir des helpers d'un module. None si helpers absents."""
+    level_entity = f"input_select.{module}_notification_level"
+    admin_entity = f"input_boolean.{module}_notif_admin"
+    if hass.states.get(level_entity) is None:
+        _LOGGER.warning(
+            "notifications_manager: module '%s' fourni mais %s absent — notification ignoree",
+            module, level_entity,
+        )
+        return None
+    level = _state_value(hass, level_entity)
+    roles: list[str] = []
+    if _is_entity_on(hass, admin_entity):
+        roles.append("admin")
+    if level == "utilisateur":
+        roles.append("utilisateur")
+    elif level == "resident":
+        roles += ["resident", "utilisateur"]
+    elif level == "proprietaire":
+        roles += ["proprietaire", "resident", "utilisateur"]
+    return roles
+
+
 def _parse_roles(roles_raw) -> list[str]:
     """Parse roles depuis liste Python ou chaine Jinja (ex. \"['admin', 'resident']\")."""
     if isinstance(roles_raw, list):
@@ -137,12 +184,23 @@ def _register_services(hass: HomeAssistant) -> None:
         message = call.data.get("message", "")
         category = call.data.get("category", "info")
         dry_run = bool(call.data.get("dry_run", False))
+        module = call.data.get("module", "")
 
-        roles = _parse_roles(call.data.get("roles", []))
+        roles_raw = call.data.get("roles", [])
+        if roles_raw:
+            roles = _parse_roles(roles_raw)
+        elif module:
+            resolved = _resolve_module_roles(hass, module)
+            if resolved is None:
+                return
+            roles = resolved
+        else:
+            roles = []
 
         if not roles:
             _LOGGER.info(
-                "notifications_manager.notify: aucun role fourni, notification ignoree (category=%s)", category
+                "notifications_manager.notify: aucun role actif (module=%s category=%s), notification ignoree",
+                module or "—", category,
             )
             return
 
@@ -261,8 +319,15 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_reload(call: ServiceCall) -> None:
         cfg = await hass.async_add_executor_job(load_config)
+        modules = await hass.async_add_executor_job(load_modules_config)
         hass.data[DOMAIN]["config"] = cfg
-        _LOGGER.info("notifications_manager: reload — %d utilisateur(s)", len(cfg.get("users", [])))
+        hass.data[DOMAIN]["modules"] = modules
+        _LOGGER.info(
+            "notifications_manager: reload — %d utilisateur(s), %d modules core, %d subscribers",
+            len(cfg.get("users", [])),
+            len(modules.get("core", [])),
+            len(modules.get("subscribers", [])),
+        )
 
     hass.services.async_register(DOMAIN, "notify", handle_notify)
     hass.services.async_register(DOMAIN, "add_user", handle_add_user)
