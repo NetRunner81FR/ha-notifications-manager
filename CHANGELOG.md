@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1-beta.1
+
+- Fix cascade direction in `module:` routing: `level=proprietaire` now notifies
+  only `proprietaire` users (highest privilege, fewest recipients); `level=resident`
+  notifies `proprietaire` + `resident`; `level=utilisateur` notifies all three.
+  Previous v0.3.0 had the cascade inverted (lower privilege = fewer recipients).
+- Add email and push deduplication: a unique address/target is contacted at most
+  once per notification, even if multiple user slugs resolve to the same address.
+- Bump component version to 0.3.1.
+
 ## 0.3.0-beta.1
 
 - Add `module:` field to `notifications_manager.notify` service: auto-resolves roles

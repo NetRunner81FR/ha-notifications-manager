@@ -21,9 +21,20 @@ Integration
 
 ### Native routing service (v0.2.0+)
 
-`notifications_manager.notify` routes notifications to users based on roles:
+`notifications_manager.notify` routes notifications to users based on roles.
+Since v0.3.0, passing `module:` auto-resolves roles from the package helpers
+(recommended). Explicit `roles:` is still supported for backward compatibility.
 
 ```yaml
+# v0.3.0+ recommended — roles resolved from helpers
+service: notifications_manager.notify
+data:
+  title: "Alert"
+  message: "Water detected in kitchen"
+  category: critique
+  module: inondation
+
+# backward-compatible explicit roles (v0.2.0+)
 service: notifications_manager.notify
 data:
   title: "Alert"
@@ -92,10 +103,10 @@ Supported roles: `admin`, `proprietaire`, `resident`, `utilisateur`.
 
 Optional fields: `source`, `alert_id`, `dedupe_key`, `priority`, `dry_run`.
 
-## Guard pattern per business package (v0.2.0+)
+## Guard pattern per business package (v0.3.0+)
 
-Each business package declares three helpers and computes the roles list in
-a Jinja template before calling the service.
+Each business package declares two helpers and passes `module:` to the service.
+Role resolution and cascade are handled natively by the integration.
 
 ```yaml
 # helpers
@@ -108,34 +119,26 @@ input_boolean:
   inondation_notif_admin:
     name: "Inondation - Notify admin"
     initial: true
-
-input_text:
-  inondation_last_event:
-    name: "Inondation - Last event"
-    max: 255
 ```
 
 ```yaml
-# automation action — roles computed from level + admin bypass
+# automation action — roles resolved automatically from helpers
 - service: notifications_manager.notify
   data:
     title: "Water detected"
     message: "Sensor triggered at {{ now().strftime('%H:%M') }}"
     category: critique
-    roles: >
-      {% set level = states('input_select.inondation_notification_level') %}
-      {% set ns = namespace(r=[]) %}
-      {% if is_state('input_boolean.inondation_notif_admin', 'on') %}
-        {% set ns.r = ns.r + ['admin'] %}
-      {% endif %}
-      {% if level == 'utilisateur' %}{% set ns.r = ns.r + ['utilisateur'] %}{% endif %}
-      {% if level == 'resident' %}{% set ns.r = ns.r + ['resident', 'utilisateur'] %}{% endif %}
-      {% if level == 'proprietaire' %}{% set ns.r = ns.r + ['proprietaire', 'resident', 'utilisateur'] %}{% endif %}
-      {{ ns.r }}
+    module: inondation
 ```
 
-Level semantics: each level includes all levels below it.
-`desactive` silences all alerts except admin bypass (if enabled).
+Level semantics (v0.3.1+): higher privilege = fewer recipients.
+
+| level          | recipients                                     |
+| -------------- | ---------------------------------------------- |
+| `proprietaire` | admin (if enabled) + proprietaire only         |
+| `resident`     | admin (if enabled) + proprietaire + resident   |
+| `utilisateur`  | admin (if enabled) + proprietaire + resident + utilisateur |
+| `desactive`    | admin only (if `input_boolean.<module>_notif_admin` is on) |
 
 A full copy-paste template is available in the factory repository at
 `ha-config/examples/guard_pattern_v2.yaml`.
