@@ -149,12 +149,17 @@ def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
     roles: list[str] = []
     if _is_entity_on(hass, admin_entity):
         roles.append("admin")
+    # Cascade vers le haut : un niveau cible les utilisateurs de ce niveau ET au-dessus.
+    # proprietaire > resident > utilisateur
+    # level=utilisateur  -> tous les roles recoivent (lowest)
+    # level=resident     -> resident et proprietaire seulement
+    # level=proprietaire -> proprietaire seulement (highest)
     if level == "utilisateur":
-        roles.append("utilisateur")
-    elif level == "resident":
-        roles += ["resident", "utilisateur"]
-    elif level == "proprietaire":
         roles += ["proprietaire", "resident", "utilisateur"]
+    elif level == "resident":
+        roles += ["proprietaire", "resident"]
+    elif level == "proprietaire":
+        roles += ["proprietaire"]
     return roles
 
 
@@ -222,6 +227,9 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             return
 
+        sent_emails: set[str] = set()
+        sent_push_targets: set[str] = set()
+
         for slug in slugs:
             role_match = any(_is_entity_on(hass, f"switch.notif_{slug}_role_{r}") for r in roles)
             if not role_match:
@@ -229,26 +237,30 @@ def _register_services(hass: HomeAssistant) -> None:
 
             push_target = _state_value(hass, f"text.notif_{slug}_push_target").strip()
             if _is_entity_on(hass, f"switch.notif_{slug}_push_enabled") and push_target:
-                try:
-                    domain_svc, svc_name = push_target.rsplit(".", 1)
-                    await hass.services.async_call(
-                        domain_svc, svc_name,
-                        {"title": effective_title, "message": message},
-                        blocking=False,
-                    )
-                except Exception as exc:
-                    _LOGGER.warning("notifications_manager.notify: erreur push %s: %s", push_target, exc)
+                if push_target not in sent_push_targets:
+                    sent_push_targets.add(push_target)
+                    try:
+                        domain_svc, svc_name = push_target.rsplit(".", 1)
+                        await hass.services.async_call(
+                            domain_svc, svc_name,
+                            {"title": effective_title, "message": message},
+                            blocking=False,
+                        )
+                    except Exception as exc:
+                        _LOGGER.warning("notifications_manager.notify: erreur push %s: %s", push_target, exc)
 
             email = _state_value(hass, f"text.notif_{slug}_email").strip()
             if smtp_on and _is_entity_on(hass, f"switch.notif_{slug}_email_enabled") and email:
-                try:
-                    await hass.services.async_call(
-                        "notify", "notify_smtp",
-                        {"title": effective_title, "message": message, "target": email},
-                        blocking=False,
-                    )
-                except Exception as exc:
-                    _LOGGER.warning("notifications_manager.notify: erreur email %s: %s", email, exc)
+                if email not in sent_emails:
+                    sent_emails.add(email)
+                    try:
+                        await hass.services.async_call(
+                            "notify", "notify_smtp",
+                            {"title": effective_title, "message": message, "target": email},
+                            blocking=False,
+                        )
+                    except Exception as exc:
+                        _LOGGER.warning("notifications_manager.notify: erreur email %s: %s", email, exc)
 
     async def handle_add_user(call: ServiceCall) -> None:
         uid = call.data["id"]

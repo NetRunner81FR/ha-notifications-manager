@@ -1,7 +1,7 @@
 {
   "domain": "notifications_manager",
   "name": "Notifications Manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "documentation": "https://git.famille-henrion.fr/NetRunner/homeassistant-factory",
   "dependencies": [],
   "codeowners": ["@NetRunner"],
