@@ -103,10 +103,36 @@ Supported roles: `admin`, `proprietaire`, `resident`, `utilisateur`.
 
 Optional fields: `source`, `alert_id`, `dedupe_key`, `priority`, `dry_run`.
 
+## Module registry / whitelist (v0.3.2+)
+
+`notifications_modules.yaml` at `/config/notifications_modules.yaml` is the
+authoritative registry of modules allowed to send notifications. Any call to
+`notifications_manager.notify` with a `module:` value not listed in `core` or
+`subscribers` is rejected silently with a WARNING log — no notification is sent.
+
+```yaml
+# /config/notifications_modules.yaml
+notifications_modules:
+  core:
+    - mqtt_watchdog
+    - ha_startup
+    # ... system modules, not editable by users
+  subscribers:
+    - inondation
+    - portail
+    - veilleuses_axel
+    # add new business modules here
+```
+
+To add a new module: declare it in `subscribers`, create its two HA helpers
+(see guard pattern below), then call `notifications_manager.reload`. No Python
+change required.
+
 ## Guard pattern per business package (v0.3.0+)
 
 Each business package declares two helpers and passes `module:` to the service.
 Role resolution and cascade are handled natively by the integration.
+The module must also be declared in `notifications_modules.yaml` (v0.3.2+).
 
 ```yaml
 # helpers
