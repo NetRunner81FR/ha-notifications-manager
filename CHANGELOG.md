@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2
+
+- Enforce `notifications_modules.yaml` as a true whitelist: calls to
+  `notifications_manager.notify` with an undeclared `module:` are now rejected
+  with a WARNING log and silently ignored. Previously, undeclared modules could
+  still pass through if their HA helper entities happened to exist.
+- Add documentation header in `notifications_modules.yaml` explaining the
+  registry role, core vs. subscribers distinction, and how to add a new module
+  without modifying Python code.
+- Activate `veilleuses_axel` as a declared subscriber module.
+- Bump component version to 0.3.2.
+
 ## 0.3.1-beta.1
 
 - Fix cascade direction in `module:` routing: `level=proprietaire` now notifies

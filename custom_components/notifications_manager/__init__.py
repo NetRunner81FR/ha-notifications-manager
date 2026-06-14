@@ -136,7 +136,16 @@ def _state_value(hass: HomeAssistant, entity_id: str) -> str:
 
 
 def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
-    """Resout les roles a partir des helpers d'un module. None si helpers absents."""
+    """Resout les roles a partir des helpers d'un module. None si module non autorise ou helpers absents."""
+    declared = hass.data.get(DOMAIN, {}).get("modules", {})
+    all_modules = declared.get("core", []) + declared.get("subscribers", [])
+    if module not in all_modules:
+        _LOGGER.warning(
+            "notifications_manager: module '%s' non declare dans notifications_modules.yaml"
+            " — notification ignoree. Ajouter le module dans subscribers pour l'activer.",
+            module,
+        )
+        return None
     level_entity = f"input_select.{module}_notification_level"
     admin_entity = f"input_boolean.{module}_notif_admin"
     if hass.states.get(level_entity) is None:
