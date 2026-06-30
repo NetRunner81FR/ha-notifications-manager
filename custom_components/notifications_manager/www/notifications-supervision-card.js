@@ -1,20 +1,14 @@
-const VERSION = "0.6.0";
+const VERSION = "0.9.1";
 
-// Allowlist entites modifiables via les vues utilisateurs/settings.
+// Allowlist entites modifiables (canaux + roles via notifications_manager, SMTP global).
 const SETTINGS_ALLOWLIST =
-  /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notif_smtp_active)$/;
+  /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active|input_boolean\.[a-z0-9_]+_notifications)$/;
 
 // Allowlist push target : text.notif_*_push_target
 const PUSH_TARGET_ALLOWLIST = /^text\.notif_[a-z0-9_]+_push_target$/;
 
 // Allowlist email : text.notif_*_email
 const EMAIL_ALLOWLIST = /^text\.notif_[a-z0-9_]+_email$/;
-
-// Allowlist package admin : input_boolean.*_notif_admin
-const PKG_ADMIN_ALLOWLIST = /^input_boolean\.[a-z0-9_]+_notif_admin$/;
-
-// Allowlist package level : input_select.*_notification_level
-const PKG_LEVEL_ALLOWLIST = /^input_select\.[a-z0-9_]+_notification_level$/;
 
 // ── Classe de base ─────────────────────────────────────────────────────────────
 
@@ -31,10 +25,43 @@ class NotificationsBaseCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this._isUserEditing()) {
+      this._render();
+    }
   }
 
-  // ── Decouverte utilisateurs ──────────────────────────────────────────────────
+  _isUserEditing() {
+    const active = this.shadowRoot?.activeElement;
+    if (!active) return false;
+    const tag = active.tagName;
+    const type = (active.type || "").toLowerCase();
+    return (tag === "INPUT" && type !== "checkbox" && type !== "radio") || tag === "TEXTAREA";
+  }
+
+  _saveScrollPosition() {
+    let el = this;
+    while (el.parentElement) {
+      el = el.parentElement;
+      const style = getComputedStyle(el);
+      if (/auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight) {
+        return { el, top: el.scrollTop };
+      }
+    }
+    return { el: window, top: window.scrollY };
+  }
+
+  _restoreScrollPosition(saved) {
+    if (!saved || saved.top <= 0) return;
+    requestAnimationFrame(() => {
+      if (saved.el === window) {
+        window.scrollTo({ top: saved.top, behavior: "instant" });
+      } else {
+        saved.el.scrollTop = saved.top;
+      }
+    });
+  }
+
+  // ── Decouverte ───────────────────────────────────────────────────────────────
 
   _discoverUsers() {
     return Object.keys(this._hass.states || {})
@@ -60,35 +87,6 @@ class NotificationsBaseCard extends HTMLElement {
       })
       .filter((u) => this._isUseful(u.label))
       .sort((a, b) => a.label.localeCompare(b.label, "fr"));
-  }
-
-  // ── Decouverte packages metier (v2) ─────────────────────────────────────────
-
-  _discoverPackages() {
-    const LEVEL_LABELS = {
-      desactive: "Désactivé",
-      utilisateur: "Utilisateur",
-      resident: "Résident",
-      proprietaire: "Propriétaire",
-    };
-    return Object.keys(this._hass.states || {})
-      .filter((id) => id.startsWith("input_select.") && id.endsWith("_notification_level"))
-      .map((id) => {
-        const pkg = id.slice("input_select.".length, -"_notification_level".length);
-        const adminEntity = `input_boolean.${pkg}_notif_admin`;
-        const level = this._state(id) || "desactive";
-        return {
-          pkg,
-          levelEntity: id,
-          adminEntity,
-          level,
-          levelLabel: LEVEL_LABELS[level] || level,
-          adminOn: this._boolState(adminEntity),
-          adminExists: Boolean(this._hass.states[adminEntity]),
-        };
-      })
-      .filter((p) => p.adminExists)
-      .sort((a, b) => a.pkg.localeCompare(b.pkg));
   }
 
   _resolveSettingsAccess() {
@@ -165,6 +163,113 @@ class NotificationsBaseCard extends HTMLElement {
     return label === haName || slug === haName.replace(/[^a-z0-9]/g, "_");
   }
 
+  _discoverSupervision() {
+    const groups =
+      this._config.supervision_groups || this._defaultSupervisionGroups();
+    const filtered = this._config.group
+      ? groups.filter(
+          (g) =>
+            this._normalize(g.id ?? g.title) ===
+            this._normalize(this._config.group)
+        )
+      : groups;
+    return filtered
+      .map((g) => ({
+        ...g,
+        entities: (g.entities || []).filter((id) => this._hass.states[id]),
+      }))
+      .filter((g) => g.entities.length > 0);
+  }
+
+  _defaultSupervisionGroups() {
+    return [
+      {
+        id: "inondation",
+        title: "Inondation",
+        icon: "mdi:water-alert",
+        entities: [
+          "input_boolean.inondation_notifications",
+          "input_text.inondation_last_event",
+        ],
+      },
+      {
+        id: "portails",
+        title: "Portails / Garage",
+        icon: "mdi:gate",
+        entities: [
+          "input_boolean.portail_notifications",
+          "input_text.portail_last_event",
+        ],
+      },
+      {
+        id: "mqtt",
+        title: "MQTT",
+        icon: "mdi:server-network",
+        entities: [
+          "input_boolean.mqtt_watchdog_notifications",
+          "binary_sensor.mqtt_broker_hors_ligne",
+          "input_text.mqtt_watchdog_last_event",
+        ],
+      },
+      {
+        id: "zigbee",
+        title: "Zigbee",
+        icon: "mdi:zigbee",
+        entities: [
+          "input_boolean.zigbee_watchdog_notifications",
+          "input_number.zigbee_watchdog_battery_seuil",
+          "input_text.zigbee_watchdog_last_event",
+        ],
+      },
+      {
+        id: "temperatures",
+        title: "Températures",
+        icon: "mdi:thermometer-alert",
+        entities: [
+          "input_boolean.temperature_anomalie_notifications",
+          "binary_sensor.temperature_anomalie_detectee",
+          "input_number.temperature_anomalie_seuil_haut",
+          "input_number.temperature_anomalie_seuil_bas",
+          "input_text.temperature_anomalie_last_event",
+        ],
+      },
+      {
+        id: "rpi5",
+        title: "RPi5",
+        icon: "mdi:raspberry-pi",
+        entities: [
+          "input_boolean.rpi5_monitoring_notifications",
+          "sensor.rpi5_health_status",
+          "input_text.rpi5_monitoring_last_event",
+        ],
+      },
+      {
+        id: "veilleuse",
+        title: "Veilleuse Axel",
+        icon: "mdi:lightbulb-night",
+        entities: ["counter.veilleuse_axel_nuit"],
+      },
+      {
+        id: "backup",
+        title: "Backup HA",
+        icon: "mdi:backup-restore",
+        entities: ["sensor.backup_last_successful_automatic_backup"],
+      },
+    ];
+  }
+
+  _discoverDomainNotifications() {
+    return Object.keys(this._hass.states || {})
+      .filter(
+        (id) =>
+          id.startsWith("input_boolean.") &&
+          id.endsWith("_notifications") &&
+          !id.startsWith("input_boolean.notif_") &&
+          SETTINGS_ALLOWLIST.test(id)
+      )
+      .sort();
+  }
+
   _detectMobileApps() {
     const notify = this._hass.services?.notify ?? {};
     return Object.keys(notify)
@@ -218,41 +323,23 @@ class NotificationsBaseCard extends HTMLElement {
     </article>`;
   }
 
-  _renderSupervisionV2(packages, editable) {
-    if (!packages.length) {
-      return `<div class="empty">Aucun package métier détecté (input_select.*_notification_level introuvable).</div>`;
+  _renderSupervision(groups) {
+    if (!groups.length) {
+      return `<div class="empty">Aucun bloc supervision disponible.</div>`;
     }
-    const LEVEL_OPTIONS = [
-      ["desactive", "Désactivé"],
-      ["utilisateur", "Utilisateur"],
-      ["resident", "Résident"],
-      ["proprietaire", "Propriétaire"],
-    ];
-    const tiles = packages.map((p) => {
-      const levelSelect = editable
-        ? `<select class="pkg-level-select" data-entity="${this._escape(p.levelEntity)}">
-            ${LEVEL_OPTIONS.map(([val, lbl]) =>
-              `<option value="${val}" ${val === p.level ? "selected" : ""}>${lbl}</option>`
-            ).join("")}
-           </select>`
-        : `<b>${this._escape(p.levelLabel)}</b>`;
-
-      const adminToggle = editable
-        ? `<label class="toggle">
-             <input type="checkbox" class="pkg-admin-toggle" data-entity="${this._escape(p.adminEntity)}" ${p.adminOn ? "checked" : ""}>
-             <span class="slider"></span>
-           </label>`
-        : `<b>${p.adminOn === true ? "Actif" : "Inactif"}</b>`;
-
-      const pkgLabel = p.pkg.replace(/_/g, " ");
-      return `<article class="tile">
-        <div class="tile-head"><strong>${this._escape(pkgLabel)}</strong></div>
-        <div class="rows">
-          <div class="row"><span>Niveau</span>${levelSelect}</div>
-          <div class="row toggle-row"><span>Admin</span>${adminToggle}</div>
+    const tiles = groups
+      .map(
+        (g) => `<article class="tile">
+        <div class="tile-head">
+          <strong>${this._escape(g.title)}</strong>
+          ${this._badge("Visible", "ok")}
         </div>
-      </article>`;
-    }).join("");
+        <div class="rows">
+          ${g.entities.map((id) => this._entityRow(id)).join("")}
+        </div>
+      </article>`
+      )
+      .join("");
     return `<div class="grid">${tiles}</div>`;
   }
 
@@ -263,6 +350,7 @@ class NotificationsBaseCard extends HTMLElement {
     }
     const editable = access === "write" && this._config.mode === "edit";
     const mobileApps = this._detectMobileApps();
+    const domainIds = this._discoverDomainNotifications();
 
     const banner = editable
       ? `<div class="banner edit-banner">Mode édition — modifications appliquées immédiatement</div>`
@@ -328,6 +416,11 @@ class NotificationsBaseCard extends HTMLElement {
       }
     }
 
+    const domainHtml = domainIds.map((id) => {
+      const friendly = this._hass.states[id]?.attributes?.friendly_name || id;
+      return this._settingsToggle(id, friendly, this._boolState(id), editable);
+    }).join("");
+
     return `
       ${banner}
       <section>
@@ -345,6 +438,9 @@ class NotificationsBaseCard extends HTMLElement {
             <h3>Personnes sans profil</h3>
             <article class="tile wide"><div class="person-list">${unconfiguredHtml}</div></article>
            </section>`
+        : ""}
+      ${domainHtml
+        ? `<section><h3>Notifications métier</h3><article class="tile wide"><div class="rows">${domainHtml}</div></article></section>`
         : ""}`;
   }
 
@@ -356,7 +452,8 @@ class NotificationsBaseCard extends HTMLElement {
       ou aucun utilisateur n'est encore configuré.</p>
       <ol>
         <li>Installez <code>notifications_manager</code> (HACS ou manuel dans <code>custom_components/</code>)</li>
-        <li>Ajoutez <code>notifications_manager:</code> à <code>configuration.yaml</code></li>
+        <li>Ajoutez <code>notifications_manager: {}</code> à <code>configuration.yaml</code></li>
+        <li>Créez <code>notifications_users.yaml</code> (voir <code>examples/</code> du dépôt HACS)</li>
         <li>Redémarrez Home Assistant</li>
       </ol>
       <p class="setup-hint">Documentation complète dans le README du dépôt HACS.</p>
@@ -366,6 +463,7 @@ class NotificationsBaseCard extends HTMLElement {
   _renderAddForm(person) {
     const f = this._addForm;
     const slug = this._toSlug(person.name);
+    // Verifier via _isUseful/_state pour ignorer les entites stales (unavailable/unknown)
     const slugConflict = this._isUseful(this._state(`text.notif_${slug}_label`));
     const rolesLabels = [
       ["Admin", "admin"], ["Propriétaire", "proprietaire"],
@@ -464,7 +562,7 @@ class NotificationsBaseCard extends HTMLElement {
     return toggleHtml;
   }
 
-  // ── Listeners ────────────────────────────────────────────────────────────────
+  // ── Listeners interactifs ────────────────────────────────────────────────────
 
   _attachSettingsListeners() {
     if (!this.shadowRoot) return;
@@ -600,32 +698,6 @@ class NotificationsBaseCard extends HTMLElement {
     });
   }
 
-  _attachSupervisionListeners() {
-    if (!this.shadowRoot) return;
-    const root = this.shadowRoot;
-
-    root.querySelectorAll("select.pkg-level-select").forEach((sel) => {
-      sel.addEventListener("change", (e) => {
-        const id = e.target.dataset.entity;
-        if (PKG_LEVEL_ALLOWLIST.test(id)) {
-          this._hass.callService("input_select", "select_option", {
-            entity_id: id,
-            option: e.target.value,
-          });
-        }
-      });
-    });
-
-    root.querySelectorAll("input.pkg-admin-toggle").forEach((cb) => {
-      cb.addEventListener("change", (e) => {
-        const id = e.target.dataset.entity;
-        if (PKG_ADMIN_ALLOWLIST.test(id)) {
-          this._hass.callService("input_boolean", "toggle", { entity_id: id });
-        }
-      });
-    });
-  }
-
   // ── Utilitaires HTML ─────────────────────────────────────────────────────────
 
   _wrapCard(title, body) {
@@ -640,6 +712,12 @@ class NotificationsBaseCard extends HTMLElement {
           ${body}
         </div>
       </ha-card>`;
+  }
+
+  _entityRow(entityId) {
+    const s = this._hass.states[entityId];
+    const name = s?.attributes?.friendly_name || entityId;
+    return this._row(name, this._state(entityId), "");
   }
 
   _row(label, value, detail) {
@@ -730,7 +808,7 @@ class NotificationsBaseCard extends HTMLElement {
       .slider::before{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
       input:checked+.slider{background:var(--primary-color,#03a9f4)}
       input:checked+.slider::before{transform:translateX(16px)}
-      select.push-select,select.pkg-level-select{border:1px solid var(--divider-color);border-radius:6px;padding:3px 6px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);max-width:160px}
+      select.push-select{border:1px solid var(--divider-color);border-radius:6px;padding:3px 6px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);max-width:160px}
       .add-btn{background:var(--primary-color,#03a9f4);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
       .add-btn:hover{opacity:.85}
       .danger-btn{background:transparent;color:var(--error-color,#e53935);border:1px solid var(--error-color,#e53935);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer}
@@ -750,6 +828,8 @@ class NotificationsBaseCard extends HTMLElement {
       .form-rows label{font-size:12px;color:var(--secondary-text-color);display:grid;gap:3px}
       .form-input{border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px;font-size:12px;background:var(--card-background-color);color:var(--primary-text-color);width:100%;box-sizing:border-box}
       .email-display{font-size:11px;color:var(--secondary-text-color)}
+      .form-input.invalid{border-color:var(--error-color,#e53935)}
+      .slug-error{color:var(--error-color,#e53935);font-size:11px;margin-left:6px}
       .slug-conflict-banner{background:rgba(229,57,53,.08);color:var(--error-color,#e53935);border-radius:6px;padding:6px 10px;font-size:12px;margin-bottom:10px}
       .slug-conflict-banner code{background:rgba(229,57,53,.12);padding:1px 4px;border-radius:3px;font-size:11px}
       .roles-row{display:flex;gap:10px;flex-wrap:wrap}
@@ -777,7 +857,10 @@ class NotificationsBaseCard extends HTMLElement {
 
 class NotificationsUsersCard extends NotificationsBaseCard {
   static getStubConfig() {
-    return { type: "custom:notifications-users-card", ignored_persons: [] };
+    return {
+      type: "custom:notifications-users-card",
+      ignored_persons: [],
+    };
   }
 
   setConfig(config) {
@@ -792,10 +875,10 @@ class NotificationsUsersCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
-    this.shadowRoot.innerHTML = this._wrapCard(
-      this._config.title || "Utilisateurs notifications",
-      this._renderUsers(this._discoverUsers())
-    );
+    const scroll = this._saveScrollPosition();
+    const title = this._config.title || "Utilisateurs notifications";
+    this.shadowRoot.innerHTML = this._wrapCard(title, this._renderUsers(this._discoverUsers()));
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -803,7 +886,10 @@ class NotificationsUsersCard extends NotificationsBaseCard {
 
 class NotificationsSettingsCard extends NotificationsBaseCard {
   static getStubConfig() {
-    return { type: "custom:notifications-settings-card", ignored_persons: [] };
+    return {
+      type: "custom:notifications-settings-card",
+      ignored_persons: [],
+    };
   }
 
   setConfig(config) {
@@ -819,13 +905,14 @@ class NotificationsSettingsCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
+    const title = this._config.title || "Paramètres notifications";
     const body = this._hasNotifEntities()
       ? this._renderSettings(this._discoverUsers())
       : this._renderSetupGuide();
-    this.shadowRoot.innerHTML = this._wrapCard(
-      this._config.title || "Paramètres notifications", body
-    );
+    this.shadowRoot.innerHTML = this._wrapCard(title, body);
     this._attachSettingsListeners();
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -833,7 +920,10 @@ class NotificationsSettingsCard extends NotificationsBaseCard {
 
 class NotificationsAuditCard extends NotificationsBaseCard {
   static getStubConfig() {
-    return { type: "custom:notifications-audit-card", ignored_persons: [] };
+    return {
+      type: "custom:notifications-audit-card",
+      ignored_persons: [],
+    };
   }
 
   setConfig(config) {
@@ -848,33 +938,44 @@ class NotificationsAuditCard extends NotificationsBaseCard {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
+    const title = this._config.title || "Audit couverture HA";
     const users = this._discoverUsers();
-    this.shadowRoot.innerHTML = this._wrapCard(
-      this._config.title || "Audit couverture HA",
-      this._renderAudit(this._auditPersons(users))
-    );
+    this.shadowRoot.innerHTML = this._wrapCard(title, this._renderAudit(this._auditPersons(users)));
+    this._restoreScrollPosition(scroll);
   }
 }
 
-// ── Carte : Supervision v2 (packages metier) + retrocompat ────────────────────
+// ── Carte : Supervision (+ rétrocompat view: xxx) ────────────────────────────
 
 class NotificationsSupervisionCard extends NotificationsBaseCard {
   static getStubConfig() {
-    return { type: "custom:notifications-supervision-card" };
+    return {
+      type: "custom:notifications-supervision-card",
+    };
   }
 
   setConfig(config) {
+    const hasSections =
+      Array.isArray(config.sections) || typeof config.sections === "string";
+    const hasView = typeof config.view === "string" && config.view.length > 0;
+
     this._config = {
-      view: config.view || "supervision",
+      view: hasView ? config.view : hasSections ? "legacy" : "supervision",
+      sections: hasSections
+        ? Array.isArray(config.sections) ? config.sections : [String(config.sections)]
+        : ["users", "audit", "supervision"],
+      group: config.group || null,
       mode: config.mode === "edit" ? "edit" : "read",
       title: config.title || null,
       ignored_persons: Array.isArray(config.ignored_persons) ? config.ignored_persons : [],
+      supervision_groups: config.supervision_groups || null,
     };
     this._render();
   }
 
   getCardSize() {
-    const sizes = { users: 4, audit: 3, supervision: 5, settings: 5 };
+    const sizes = { users: 4, audit: 3, supervision: 5, settings: 5, legacy: 10 };
     return sizes[this._config.view] ?? 5;
   }
 
@@ -883,8 +984,9 @@ class NotificationsSupervisionCard extends NotificationsBaseCard {
     const map = {
       users: "Utilisateurs notifications",
       audit: "Audit couverture HA",
-      supervision: "Supervision packages",
+      supervision: this._config.group ? `Supervision – ${this._config.group}` : "Supervision",
       settings: "Paramètres notifications",
+      legacy: "Notifications / Supervision",
     };
     return map[this._config.view] ?? "Supervision";
   }
@@ -892,11 +994,16 @@ class NotificationsSupervisionCard extends NotificationsBaseCard {
   _render() {
     if (!this.shadowRoot || !this._hass) return;
     const view = this._config.view;
-    const access = this._resolveSettingsAccess();
-    const editable = access !== "none" && this._config.mode === "edit";
+    const scroll = this._saveScrollPosition();
     let body = "";
 
-    if (view === "users") {
+    if (view === "legacy") {
+      const sections = new Set(this._config.sections);
+      const users = this._discoverUsers();
+      if (sections.has("users")) body += this._renderUsers(users);
+      if (sections.has("audit")) body += this._renderAudit(this._auditPersons(users));
+      if (sections.has("supervision")) body += this._renderSupervision(this._discoverSupervision());
+    } else if (view === "users") {
       body = this._renderUsers(this._discoverUsers());
     } else if (view === "audit") {
       body = this._renderAudit(this._auditPersons(this._discoverUsers()));
@@ -905,15 +1012,12 @@ class NotificationsSupervisionCard extends NotificationsBaseCard {
         ? this._renderSettings(this._discoverUsers())
         : this._renderSetupGuide();
     } else {
-      body = this._renderSupervisionV2(this._discoverPackages(), editable);
+      body = this._renderSupervision(this._discoverSupervision());
     }
 
     this.shadowRoot.innerHTML = this._wrapCard(this._autoTitle(), body);
-
     if (view === "settings") this._attachSettingsListeners();
-    if (view === "supervision" || !["users", "audit", "settings"].includes(view)) {
-      this._attachSupervisionListeners();
-    }
+    this._restoreScrollPosition(scroll);
   }
 }
 
@@ -942,7 +1046,7 @@ const CARDS = [
     cls: NotificationsSupervisionCard,
     type: "notifications-supervision-card",
     name: "Notifications – Supervision",
-    description: "Supervision des packages métier (niveaux et admin par package).",
+    description: "Supervision des groupes de notifications et entités métier.",
   },
 ];
 

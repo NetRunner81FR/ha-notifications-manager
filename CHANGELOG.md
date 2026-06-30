@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1-beta.1
+
+- Fix UX: preserve focus on text inputs during HA state updates (`_isUserEditing()` guard on `set hass()`).
+- Fix UX: preserve scroll position around all `innerHTML` rebuilds (`_saveScrollPosition` / `_restoreScrollPosition`).
+- Affects: email field focus loss, scroll reset when editing params at bottom of page, admin/resident selector requiring two actions.
+
 ## 0.3.2
 
 - Enforce `notifications_modules.yaml` as a true whitelist: calls to

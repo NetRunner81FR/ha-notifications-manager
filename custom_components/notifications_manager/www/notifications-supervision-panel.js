@@ -1,4 +1,4 @@
-const VERSION = "0.9.0";
+const VERSION = "0.9.1";
 
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active)$/;
@@ -29,10 +29,43 @@ class NotificationsSupervisionPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this._isUserEditing()) {
+      this._render();
+    }
   }
 
   set panel(_panel) {}
+
+  _isUserEditing() {
+    const active = this.shadowRoot?.activeElement;
+    if (!active) return false;
+    const tag = active.tagName;
+    const type = (active.type || "").toLowerCase();
+    return (tag === "INPUT" && type !== "checkbox" && type !== "radio") || tag === "TEXTAREA";
+  }
+
+  _saveScrollPosition() {
+    let el = this;
+    while (el.parentElement) {
+      el = el.parentElement;
+      const style = getComputedStyle(el);
+      if (/auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight) {
+        return { el, top: el.scrollTop };
+      }
+    }
+    return { el: window, top: window.scrollY };
+  }
+
+  _restoreScrollPosition(saved) {
+    if (!saved || saved.top <= 0) return;
+    requestAnimationFrame(() => {
+      if (saved.el === window) {
+        window.scrollTo({ top: saved.top, behavior: "instant" });
+      } else {
+        saved.el.scrollTop = saved.top;
+      }
+    });
+  }
 
   set narrow(narrow) {
     this._narrow = narrow;
@@ -42,6 +75,7 @@ class NotificationsSupervisionPanel extends HTMLElement {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    const scroll = this._saveScrollPosition();
     const tabsHtml = TABS.map(
       (t) =>
         `<button class="tab${this._activeTab === t.id ? " active" : ""}" data-tab="${t.id}">${t.label}</button>`
@@ -79,6 +113,7 @@ class NotificationsSupervisionPanel extends HTMLElement {
     if (this._activeTab === "settings") this._attachSettingsListeners();
     if (this._activeTab === "supervision") this._attachSupervisionListeners();
     if (this._activeTab === "modules") this._loadModulesTab();
+    this._restoreScrollPosition(scroll);
   }
 
   _renderTab() {
