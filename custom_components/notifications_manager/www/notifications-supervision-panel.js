@@ -1,4 +1,4 @@
-const VERSION = "0.9.2";
+const VERSION = "0.9.3";
 
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active)$/;
@@ -45,29 +45,18 @@ class NotificationsSupervisionPanel extends HTMLElement {
   }
 
   _saveScrollPosition() {
-    let el = this;
-    while (true) {
-      const next = el.parentElement ??
-        (el.getRootNode?.() instanceof ShadowRoot ? el.getRootNode().host : null);
-      if (!next) break;
-      el = next;
-      if (el === document.documentElement || el === document.body) continue;
-      try {
-        if (el.scrollTop > 0) return { el, top: el.scrollTop };
-      } catch (_) {}
-    }
-    const winTop = window.scrollY || window.pageYOffset || 0;
-    return winTop > 0 ? { el: window, top: winTop } : null;
+    // Le scroll est dans .panel-content à l'intérieur du shadow root.
+    // On lit la valeur avant le rebuild ; après rebuild on retrouve le nouvel élément par sélecteur.
+    const inner = this.shadowRoot?.querySelector(".panel-content");
+    if (inner && inner.scrollTop > 0) return inner.scrollTop;
+    return 0;
   }
 
-  _restoreScrollPosition(saved) {
-    if (!saved) return;
+  _restoreScrollPosition(top) {
+    if (!top) return;
     requestAnimationFrame(() => {
-      if (saved.el === window) {
-        window.scrollTo({ top: saved.top, behavior: "instant" });
-      } else {
-        saved.el.scrollTop = saved.top;
-      }
+      const inner = this.shadowRoot?.querySelector(".panel-content");
+      if (inner) inner.scrollTop = top;
     });
   }
 
