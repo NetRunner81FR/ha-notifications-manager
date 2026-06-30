@@ -1,4 +1,4 @@
-const VERSION = "0.9.1";
+const VERSION = "0.9.2";
 
 const SETTINGS_ALLOWLIST =
   /^(switch\.notif_[a-z0-9_]+_(email_enabled|push_enabled|role_(admin|proprietaire|resident|utilisateur))|switch\.notifications_manager_smtp_active)$/;
@@ -46,18 +46,22 @@ class NotificationsSupervisionPanel extends HTMLElement {
 
   _saveScrollPosition() {
     let el = this;
-    while (el.parentElement) {
-      el = el.parentElement;
-      const style = getComputedStyle(el);
-      if (/auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight) {
-        return { el, top: el.scrollTop };
-      }
+    while (true) {
+      const next = el.parentElement ??
+        (el.getRootNode?.() instanceof ShadowRoot ? el.getRootNode().host : null);
+      if (!next) break;
+      el = next;
+      if (el === document.documentElement || el === document.body) continue;
+      try {
+        if (el.scrollTop > 0) return { el, top: el.scrollTop };
+      } catch (_) {}
     }
-    return { el: window, top: window.scrollY };
+    const winTop = window.scrollY || window.pageYOffset || 0;
+    return winTop > 0 ? { el: window, top: winTop } : null;
   }
 
   _restoreScrollPosition(saved) {
-    if (!saved || saved.top <= 0) return;
+    if (!saved) return;
     requestAnimationFrame(() => {
       if (saved.el === window) {
         window.scrollTo({ top: saved.top, behavior: "instant" });
