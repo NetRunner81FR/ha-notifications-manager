@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3
+
+- Fix UX: preserve focus on text inputs during HA state updates (`_isUserEditing()` guard on `set hass()`).
+- Fix UX: preserve scroll position using shadow-root-internal queries only — no parent DOM traversal to avoid HA internal scroll regression.
+- Affects panel and card: email field focus loss, scroll reset when editing params at bottom of page, admin/resident selector requiring two actions.
+- Validated in DEV and RECETTE (E2E PASS, manual T4a/T4b/T4c PASS).
+
 ## 0.9.1-beta.1
 
 - Fix UX: preserve focus on text inputs during HA state updates (`_isUserEditing()` guard on `set hass()`).
