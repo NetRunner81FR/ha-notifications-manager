@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -16,10 +17,12 @@ except Exception:
     _MANIFEST_VERSION = "0"
 
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import discovery
+from homeassistant.helpers import discovery, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
 from .config_loader import (
     CONFIG_FILE,
@@ -30,6 +33,7 @@ from .config_loader import (
     validate_user_id,
 )
 from .const import DOMAIN, ROLES
+from .email_format import format_email_message, format_email_title
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,6 +176,55 @@ def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
     return roles
 
 
+async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str) -> str | None:
+    """Resout l'entite notify.* correspondant a un destinataire SMTP.
+
+    L'integration smtp (HA 2026.7+) n'a plus de champ "target" par appel :
+    chaque destinataire est une recipient subentry distincte de la config
+    entry SMTP, materialisee par sa propre entite notify.*. Cree la
+    subentry si absente (issue #131 : #104 supposait a tort un champ
+    target toujours valide sur smtp.send_message).
+    """
+    entries = [
+        e for e in hass.config_entries.async_entries("smtp")
+        if e.state == ConfigEntryState.LOADED
+    ]
+    if not entries:
+        _LOGGER.warning("notifications_manager: aucune config entry smtp chargee, envoi email impossible")
+        return None
+    entry = entries[0]
+
+    registry = er.async_get(hass)
+    unique_id = f"{entry.entry_id}_{email}"
+
+    def _find_entity_id() -> str | None:
+        for entity in registry.entities.values():
+            if entity.platform == "smtp" and entity.config_entry_id == entry.entry_id and entity.unique_id == unique_id:
+                return entity.entity_id
+        return None
+
+    entity_id = _find_entity_id()
+    if entity_id:
+        return entity_id
+
+    hass.config_entries.async_add_subentry(
+        entry,
+        ConfigSubentry(data={}, subentry_type="recipient", title=email, unique_id=email),
+    )
+
+    for _ in range(10):
+        await asyncio.sleep(0.2)
+        entity_id = _find_entity_id()
+        if entity_id:
+            return entity_id
+
+    _LOGGER.warning(
+        "notifications_manager: entite smtp non trouvee pour '%s' apres creation de la recipient subentry",
+        email,
+    )
+    return None
+
+
 def _parse_roles(roles_raw) -> list[str]:
     """Parse roles depuis liste Python ou chaine Jinja (ex. \"['admin', 'resident']\")."""
     if isinstance(roles_raw, list):
@@ -263,11 +316,23 @@ def _register_services(hass: HomeAssistant) -> None:
                 if email not in sent_emails:
                     sent_emails.add(email)
                     try:
-                        await hass.services.async_call(
-                            "notify", "notify_smtp",
-                            {"title": effective_title, "message": message, "target": email},
-                            blocking=False,
-                        )
+                        # Migration #104 puis #131 : notify.notify_smtp est deprecie
+                        # (suppression HA 2027.3.0). L'integration smtp (HA 2026.7+) n'a
+                        # plus de champ "target" par appel : chaque destinataire est une
+                        # recipient subentry distincte avec sa propre entite notify.*,
+                        # resolue/creee dynamiquement. Voir docs/ia/specs/131-smtp-recipient-subentries.md.
+                        smtp_entity_id = await _resolve_or_create_smtp_recipient(hass, email)
+                        if smtp_entity_id:
+                            now = dt_util.now()
+                            await hass.services.async_call(
+                                "smtp", "send_message",
+                                {
+                                    "entity_id": smtp_entity_id,
+                                    "title": format_email_title(effective_title, now),
+                                    "message": format_email_message(message, now),
+                                },
+                                blocking=False,
+                            )
                     except Exception as exc:
                         _LOGGER.warning("notifications_manager.notify: erreur email %s: %s", email, exc)
 

@@ -1,6 +1,6 @@
-# Home Assistant Notifications Manager
+![Notifications Manager](./icon.png)
 
-**Version: 0.9.3**
+# Home Assistant Notifications Manager
 
 Standalone HACS integration for managing notification recipients as native Home
 Assistant entities, with built-in routing service and supervision panel.
