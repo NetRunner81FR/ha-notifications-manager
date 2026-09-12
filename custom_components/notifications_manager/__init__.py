@@ -176,7 +176,7 @@ def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
     return roles
 
 
-async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str) -> str | None:
+async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str, label: str = "") -> str | None:
     """Resout l'entite notify.* correspondant a un destinataire SMTP.
 
     L'integration smtp (HA 2026.7+) n'a plus de champ "target" par appel :
@@ -184,6 +184,13 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str) -> 
     entry SMTP, materialisee par sa propre entite notify.*. Cree la
     subentry si absente (issue #131 : #104 supposait a tort un champ
     target toujours valide sur smtp.send_message).
+
+    Le libelle affiche (title) est le nom de l'utilisateur
+    notifications_manager (label), pas l'email brut - lisibilite dans
+    l'UI de l'integration smtp. L'unicite reste garantie par l'email
+    (unique_id de la subentry), independamment du libelle : jamais de
+    doublon meme si deux utilisateurs partagent un email ou si le
+    libelle change.
     """
     entries = [
         e for e in hass.config_entries.async_entries("smtp")
@@ -194,23 +201,36 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str) -> 
         return None
     entry = entries[0]
 
+    desired_title = label.strip() if label and label.strip() else email
+
+    existing_subentry = next(
+        (
+            s for s in entry.subentries.values()
+            if s.subentry_type == "recipient" and s.unique_id == email
+        ),
+        None,
+    )
+    if existing_subentry is not None:
+        if existing_subentry.title != desired_title:
+            hass.config_entries.async_update_subentry(entry, existing_subentry, title=desired_title)
+    else:
+        hass.config_entries.async_add_subentry(
+            entry,
+            ConfigSubentry(data={}, subentry_type="recipient", title=desired_title, unique_id=email),
+        )
+
     registry = er.async_get(hass)
-    unique_id = f"{entry.entry_id}_{email}"
+    target_unique_id = f"{entry.entry_id}_{email}"
 
     def _find_entity_id() -> str | None:
         for entity in registry.entities.values():
-            if entity.platform == "smtp" and entity.config_entry_id == entry.entry_id and entity.unique_id == unique_id:
+            if entity.platform == "smtp" and entity.config_entry_id == entry.entry_id and entity.unique_id == target_unique_id:
                 return entity.entity_id
         return None
 
     entity_id = _find_entity_id()
     if entity_id:
         return entity_id
-
-    hass.config_entries.async_add_subentry(
-        entry,
-        ConfigSubentry(data={}, subentry_type="recipient", title=email, unique_id=email),
-    )
 
     for _ in range(10):
         await asyncio.sleep(0.2)
@@ -219,7 +239,7 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str) -> 
             return entity_id
 
     _LOGGER.warning(
-        "notifications_manager: entite smtp non trouvee pour '%s' apres creation de la recipient subentry",
+        "notifications_manager: entite smtp non trouvee pour '%s' apres creation/mise a jour de la recipient subentry",
         email,
     )
     return None
@@ -321,7 +341,8 @@ def _register_services(hass: HomeAssistant) -> None:
                         # plus de champ "target" par appel : chaque destinataire est une
                         # recipient subentry distincte avec sa propre entite notify.*,
                         # resolue/creee dynamiquement. Voir docs/ia/specs/131-smtp-recipient-subentries.md.
-                        smtp_entity_id = await _resolve_or_create_smtp_recipient(hass, email)
+                        recipient_label = _state_value(hass, f"text.notif_{slug}_label").strip()
+                        smtp_entity_id = await _resolve_or_create_smtp_recipient(hass, email, recipient_label)
                         if smtp_entity_id:
                             now = dt_util.now()
                             await hass.services.async_call(

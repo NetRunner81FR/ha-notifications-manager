@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.5-beta.1
+
+- Reliability (issue #131): SMTP recipient subentries are now titled
+  with the notifications_manager user's own label (e.g. their name)
+  instead of the raw email address, for readability in the smtp
+  integration's recipient list. Uniqueness is still guaranteed by the
+  email address alone (`unique_id`), independent of the label, so no
+  duplicate subentry can ever be created even if two users share an
+  email or a label changes over time. Existing subentries have their
+  title kept in sync on each send if the label changed.
+
 ## 0.9.4-beta.1
 
 - Fix critical regression (issue #131): no notifications_manager email
