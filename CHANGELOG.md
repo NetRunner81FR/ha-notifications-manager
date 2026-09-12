@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.6-beta.1
+
+- Reliability (issue #131): SMTP recipient subentries for all active
+  users (email + email_enabled) are now created/updated at startup
+  (once Home Assistant is fully started, `EVENT_HOMEASSISTANT_STARTED`),
+  instead of lazily on the first real notification. Ensures a new user
+  or a changed email gets its subentry ready immediately after a
+  restart, with no need to wait for a live alert. Does not clean up
+  orphaned subentries (e.g. a previous email after a change, or the
+  YAML-imported default recipient) - removing those automatically risks
+  deleting a legitimate recipient not managed by notifications_manager;
+  documented limitation.
+
 ## 0.9.5-beta.1
 
 - Reliability (issue #131): SMTP recipient subentries are now titled

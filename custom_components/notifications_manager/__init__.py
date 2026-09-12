@@ -18,8 +18,8 @@ except Exception:
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers import discovery, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
@@ -61,6 +61,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await _register_static_path(hass)
     _register_panel(hass)
     _register_api_views(hass)
+
+    async def _on_started(event: Event) -> None:
+        await _reconcile_smtp_recipients(hass)
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
     _LOGGER.info(
         "notifications_manager: %d utilisateur(s), %d modules core, %d subscribers",
@@ -243,6 +248,42 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str, lab
         email,
     )
     return None
+
+
+async def _reconcile_smtp_recipients(hass: HomeAssistant) -> None:
+    """Cree/met a jour au demarrage les recipient subentries SMTP de tous
+    les utilisateurs actifs (email + email_enabled), sans attendre un
+    premier envoi reel qui les aurait creees paresseusement. Assure une
+    migration sans effort apres une mise a jour (nouvel utilisateur,
+    email modifie) - demande PO suite a #131.
+
+    Ne supprime pas les subentries orphelines (ex. destinataire par
+    defaut importe du YAML, ou ancien email d'un utilisateur modifie) :
+    risque de supprimer un destinataire legitime non gere par
+    notifications_manager. Limitation documentee, acceptee.
+    """
+    cfg = hass.data.get(DOMAIN, {}).get("config", {})
+    users = cfg.get("users", [])
+    reconciled = 0
+    for user in users:
+        email = str(user.get("email") or "").strip()
+        if not user.get("email_enabled") or not email:
+            continue
+        label = str(user.get("label") or "").strip()
+        try:
+            entity_id = await _resolve_or_create_smtp_recipient(hass, email, label)
+            if entity_id:
+                reconciled += 1
+        except Exception as exc:
+            _LOGGER.warning(
+                "notifications_manager: reconciliation SMTP au demarrage echouee pour '%s': %s",
+                email, exc,
+            )
+    _LOGGER.info(
+        "notifications_manager: reconciliation SMTP au demarrage - %d/%d utilisateur(s) actif(s) avec email traites",
+        reconciled,
+        sum(1 for u in users if u.get("email_enabled") and str(u.get("email") or "").strip()),
+    )
 
 
 def _parse_roles(roles_raw) -> list[str]:
