@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.7-beta.1
+
+- Reliability (issue #131): editing a user's email in notifications_manager
+  now updates their existing SMTP recipient subentry in place (rename,
+  same entity) instead of creating a separate new one and leaving the
+  old one behind. Subentries created by notifications_manager now carry
+  the user's own id in their data (`nm_slug`), which is the real
+  identity key - the email is no longer used to decide "is this the
+  same recipient", since it's precisely the field that can change. A
+  pre-existing subentry for an email (e.g. one created before this fix,
+  or the YAML-imported default) is adopted on first match rather than
+  duplicated. If the new email is already used by an unrelated
+  subentry, the rename is skipped with a warning and the old address is
+  kept, to avoid a unique_id conflict.
+
 ## 0.9.6-beta.1
 
 - Reliability (issue #131): SMTP recipient subentries for all active

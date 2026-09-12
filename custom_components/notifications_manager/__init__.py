@@ -181,7 +181,7 @@ def _resolve_module_roles(hass: HomeAssistant, module: str) -> list[str] | None:
     return roles
 
 
-async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str, label: str = "") -> str | None:
+async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, slug: str, email: str, label: str = "") -> str | None:
     """Resout l'entite notify.* correspondant a un destinataire SMTP.
 
     L'integration smtp (HA 2026.7+) n'a plus de champ "target" par appel :
@@ -190,12 +190,18 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str, lab
     subentry si absente (issue #131 : #104 supposait a tort un champ
     target toujours valide sur smtp.send_message).
 
+    Chaque subentry cree ici porte le slug utilisateur notifications_manager
+    dans ses donnees (`data={"nm_slug": slug}`) : c'est cette cle, pas
+    l'email, qui identifie "la" subentry d'un utilisateur. Quand son
+    email change, la MEME subentry est mise a jour en place (unique_id +
+    titre), au lieu d'en creer une nouvelle a cote de l'ancienne
+    (demande PO : editer l'email dans notifications_manager doit se
+    repercuter sur l'integration smtp, pas laisser une entree
+    orpheline).
+
     Le libelle affiche (title) est le nom de l'utilisateur
     notifications_manager (label), pas l'email brut - lisibilite dans
-    l'UI de l'integration smtp. L'unicite reste garantie par l'email
-    (unique_id de la subentry), independamment du libelle : jamais de
-    doublon meme si deux utilisateurs partagent un email ou si le
-    libelle change.
+    l'UI de l'integration smtp.
     """
     entries = [
         e for e in hass.config_entries.async_entries("smtp")
@@ -208,21 +214,56 @@ async def _resolve_or_create_smtp_recipient(hass: HomeAssistant, email: str, lab
 
     desired_title = label.strip() if label and label.strip() else email
 
-    existing_subentry = next(
+    def _email_taken_by_other(candidate_email: str, exclude_subentry_id: str | None) -> bool:
+        return any(
+            s.subentry_type == "recipient" and s.unique_id == candidate_email and s.subentry_id != exclude_subentry_id
+            for s in entry.subentries.values()
+        )
+
+    owned_subentry = next(
         (
             s for s in entry.subentries.values()
-            if s.subentry_type == "recipient" and s.unique_id == email
+            if s.subentry_type == "recipient" and s.data.get("nm_slug") == slug
         ),
         None,
     )
-    if existing_subentry is not None:
-        if existing_subentry.title != desired_title:
-            hass.config_entries.async_update_subentry(entry, existing_subentry, title=desired_title)
+
+    if owned_subentry is not None:
+        updates: dict = {}
+        if owned_subentry.unique_id != email:
+            if _email_taken_by_other(email, owned_subentry.subentry_id):
+                _LOGGER.warning(
+                    "notifications_manager: impossible de renommer la subentry SMTP de '%s' vers '%s'"
+                    " (deja utilisee par une autre subentry) - ancienne adresse conservee",
+                    slug, email,
+                )
+            else:
+                updates["unique_id"] = email
+        if owned_subentry.title != desired_title:
+            updates["title"] = desired_title
+        if updates:
+            hass.config_entries.async_update_subentry(entry, owned_subentry, **updates)
     else:
-        hass.config_entries.async_add_subentry(
-            entry,
-            ConfigSubentry(data={}, subentry_type="recipient", title=desired_title, unique_id=email),
+        unowned_subentry = next(
+            (
+                s for s in entry.subentries.values()
+                if s.subentry_type == "recipient" and s.unique_id == email and "nm_slug" not in s.data
+            ),
+            None,
         )
+        if unowned_subentry is not None:
+            # Subentry preexistante pour cet email (creee avant ce correctif,
+            # ou importee du YAML) : on se l'approprie plutot que d'en
+            # recreer une doublon.
+            updates = {"data": {**unowned_subentry.data, "nm_slug": slug}}
+            if unowned_subentry.title != desired_title:
+                updates["title"] = desired_title
+            hass.config_entries.async_update_subentry(entry, unowned_subentry, **updates)
+        else:
+            hass.config_entries.async_add_subentry(
+                entry,
+                ConfigSubentry(data={"nm_slug": slug}, subentry_type="recipient", title=desired_title, unique_id=email),
+            )
 
     registry = er.async_get(hass)
     target_unique_id = f"{entry.entry_id}_{email}"
@@ -269,9 +310,10 @@ async def _reconcile_smtp_recipients(hass: HomeAssistant) -> None:
         email = str(user.get("email") or "").strip()
         if not user.get("email_enabled") or not email:
             continue
+        uid = str(user.get("id") or "").strip()
         label = str(user.get("label") or "").strip()
         try:
-            entity_id = await _resolve_or_create_smtp_recipient(hass, email, label)
+            entity_id = await _resolve_or_create_smtp_recipient(hass, uid, email, label)
             if entity_id:
                 reconciled += 1
         except Exception as exc:
@@ -383,7 +425,7 @@ def _register_services(hass: HomeAssistant) -> None:
                         # recipient subentry distincte avec sa propre entite notify.*,
                         # resolue/creee dynamiquement. Voir docs/ia/specs/131-smtp-recipient-subentries.md.
                         recipient_label = _state_value(hass, f"text.notif_{slug}_label").strip()
-                        smtp_entity_id = await _resolve_or_create_smtp_recipient(hass, email, recipient_label)
+                        smtp_entity_id = await _resolve_or_create_smtp_recipient(hass, slug, email, recipient_label)
                         if smtp_entity_id:
                             now = dt_util.now()
                             await hass.services.async_call(
